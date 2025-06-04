@@ -1,0 +1,37 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/25.0.2 Chrome/128.0.6613.186 Electron/32.2.5 Safari/537.36" version="25.0.2">
+  <diagram name="Page-1" id="0QxZF0NzxoOuITy8j7A4">
+    <mxGraphModel dx="1026" dy="743" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="vlQklLCOxlCWhmk4wWh2-17" value="IPCC report PDF page" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="110" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="vlQklLCOxlCWhmk4wWh2-18" value="Convert to word docx" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="180" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="vlQklLCOxlCWhmk4wWh2-19" value="pass each page/chapter into Crossref Simple Text Query" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="250" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="vlQklLCOxlCWhmk4wWh2-20" value="return result from STQ as .txt file" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="320" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="vlQklLCOxlCWhmk4wWh2-21" value="Used Sublime Text to extract all DOI patterns from text tiles into one file: IPCC_report.txt&lt;div&gt;&lt;br&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="390" width="210" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="vlQklLCOxlCWhmk4wWh2-22" value="DOI_errors.ipynb" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="460" width="120" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="vlQklLCOxlCWhmk4wWh2-23" value="This notebook imports the IPCC_report.txt and performs the following:&lt;div&gt;1. counts total: 6135 DOIs&lt;/div&gt;&lt;div&gt;2. removes resolvers: 4675 had https://doi.org/ or http://doi.org/ or 33.9% of total&lt;/div&gt;&lt;div&gt;3.remove duplicate DOIs - 231 DOIs were used 2 or more times, removed 253 DOIs, 5883 DOIs are unique&lt;/div&gt;&lt;div&gt;4. check for registration status: as of April 10, 5845 registered with Crossref, 29 not registered, 7 with DataCite, 2 with ISTIC&lt;/div&gt;&lt;div&gt;5. saved out as &quot;IPCC_Reposrt_cleaned_DOIs.txt&quot;&lt;/div&gt;" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="170" y="460" width="660" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="vlQklLCOxlCWhmk4wWh2-25" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0.25;entryY=1;entryDx=0;entryDy=0;startArrow=classic;startFill=1;endArrow=none;endFill=0;flowAnimation=1;anchorPointDirection=1;flowAnimationDirection=reverse;" edge="1" parent="1" source="vlQklLCOxlCWhmk4wWh2-24" target="vlQklLCOxlCWhmk4wWh2-23">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="vlQklLCOxlCWhmk4wWh2-24" value="Saved out: IPCC_Report_cleaned_DOIs.txt" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="640" y="570" width="200" height="60" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
