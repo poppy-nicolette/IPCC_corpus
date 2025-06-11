@@ -27,9 +27,9 @@ Usage:
     analysis = BiblioNet(works_file,citations_file)
     analysis.load_data()
     analysis.clean_data()
-    net_result = analysis.net_bc()
-    analysis.edges_net_bc(net_result)
-    analysis.nodes_bc()
+    analysis.net_bc()
+    analysis.net_dc()
+    analysis.nodes_export()
 """
 import argparse
 import glob
@@ -79,7 +79,8 @@ class BiblioNet:
         self.export_edges(net_bc, "net_bc.csv")
 
     def net_dc(self):
-        #creates direct citation edges
+        #creates direct citation edges, using a mask, probably don't need this step
+        # but it might be necessary for certain citations files that extend beyond core works
         net_dc = self.citations[
             self.citations['citing_id'].isin(self.works['id']) &
             self.citations['cited_id'].isin(self.works['id'])
@@ -98,7 +99,27 @@ class BiblioNet:
 
     def net_cc(self):
         #creates co-citation edges
-        ...
+        # just get one column
+        works_id = works[['id']]
+        #first inner join on 'id' and 'cited_id'
+        joined_citations = pd.merge(works_id, citations, left_on='id', right_on= 'cited_id', how='inner')
+        #second inner join on 'citing_id'
+        joined_citations = pd.merge(joined_citations, citations, on='citing_id', how='inner')
+        #filter - could have done this first?
+        filtered_citations = joined_citations[joined_citations['cited_id'].isin(works_id['id'])]
+        #rename cols
+        filtered_citations = filtered_citations.rename(columns={'id':'source', 'cited_id':'target'})
+        print(filtered_citations.head(2))
+        #filter where source is less than target r:  filter(source < target)
+        # i don't totally understand this, becuase these are ids?
+        filtered_citations = filtered_citations[filtered_citations['source']<filtered_citations['target']]
+        # groupby 'source' and 'target' in that order, and use size() as equivalent for summarize
+        grouped_citations = filtered_citations.groupby(['source','target']).size().reset_index(name='weight')
+        print(grouped_citations.head(2))
+        #add type col with value 'undirected'
+        grouped_citations['type'] = 'undirected'
+        #convert to ints
+
         #return net_cc
 
     def net_bc_cc_dc(self):
@@ -144,7 +165,7 @@ class BiblioNet:
         df.to_csv(file_path,encoding="utf-8",index=False)
         print(Fore.LIGHTCYAN_EX + f"✅ Exported {file_name} file as {file_path}" + Style.RESET_ALL)
 
-    def nodes_bc(self):
+    def nodes_export(self):
         #creates the bibliographic coupling nodes
         # List files in the directory and filter those that start with "net_"
         net_files = [f for f in os.listdir("networks/") if f.startswith("net_")]
@@ -220,7 +241,7 @@ def main(works_file, citations_file):
     print(".....calculating dc edges...")
     analysis.net_dc()
     print(Fore.LIGHTMAGENTA_EX + ".....calculating nodes..this can take a while..."+ Style.RESET_ALL)
-    analysis.nodes_bc()
+    analysis.nodes_export()
     print(Fore.LIGHTBLUE_EX + "All complete! Thank you for shopping at S-Mart!" + Style.RESET_ALL)
 
 if __name__ == '__main__':
