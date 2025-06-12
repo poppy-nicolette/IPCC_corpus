@@ -100,27 +100,31 @@ class BiblioNet:
     def net_cc(self):
         #creates co-citation edges
         # just get one column
-        works_id = works[['id']]
+        works_id = self.works['id']
         #first inner join on 'id' and 'cited_id'
-        joined_citations = pd.merge(works_id, citations, left_on='id', right_on= 'cited_id', how='inner')
+        joined_citations = pd.merge(works_id, self.citations, left_on='id', right_on= 'cited_id', how='inner')
         #second inner join on 'citing_id'
-        joined_citations = pd.merge(joined_citations, citations, on='citing_id', how='inner')
+        joined_citations = pd.merge(joined_citations, self.citations, on='citing_id', how='inner')
+        #print(f"after second join: \n{joined_citations.head(2)}")
         #filter - could have done this first?
-        filtered_citations = joined_citations[joined_citations['cited_id'].isin(works_id['id'])]
+        filtered_citations = joined_citations[joined_citations['cited_id_y'].isin(joined_citations['id'])]
         #rename cols
-        filtered_citations = filtered_citations.rename(columns={'id':'source', 'cited_id':'target'})
-        print(filtered_citations.head(2))
+        filtered_citations = filtered_citations.rename(columns={'cited_id_x':'source', 'cited_id_y':'target'})
+        #print(f"after rename cols: \n{filtered_citations.head(2)}")
         #filter where source is less than target r:  filter(source < target)
         # i don't totally understand this, becuase these are ids?
         filtered_citations = filtered_citations[filtered_citations['source']<filtered_citations['target']]
         # groupby 'source' and 'target' in that order, and use size() as equivalent for summarize
-        grouped_citations = filtered_citations.groupby(['source','target']).size().reset_index(name='weight')
-        print(grouped_citations.head(2))
+        net_cc = filtered_citations.groupby(['source','target']).size().reset_index(name='weight')
+        #print(f"after groupby:\n{net_cc.head(2)}")
         #add type col with value 'undirected'
-        grouped_citations['type'] = 'undirected'
+        net_cc['type'] = 'undirected'
+        #print(f"added undirected in type: \n{net_cc.head(2)}")
         #convert to ints
+        net_cc['source'] = net_cc['source'].astype(int)
+        net_cc['target'] = net_cc['target'].astype(int)
 
-        #return net_cc
+        self.export_edges(net_cc, "net_cc.csv")
 
     def net_bc_cc_dc(self):
         #creates hybrid BC-CC-DC edges
@@ -173,6 +177,7 @@ class BiblioNet:
         for file in net_files:
             # Read the CSV file into a DataFrame
             df = pd.read_csv(os.path.join("networks", file))
+            print(f".....calculating nodes for {file}...")
 
             #create a graph from the DataFrame, uses column names for attributes
             network = nx.from_pandas_edgelist(df, source='source', target='target', edge_attr='weight')
@@ -240,6 +245,8 @@ def main(works_file, citations_file):
     analysis.net_bc()
     print(".....calculating dc edges...")
     analysis.net_dc()
+    print(".......calculating cc edges...")
+    analysis.net_cc()
     print(Fore.LIGHTMAGENTA_EX + ".....calculating nodes..this can take a while..."+ Style.RESET_ALL)
     analysis.nodes_export()
     print(Fore.LIGHTBLUE_EX + "All complete! Thank you for shopping at S-Mart!" + Style.RESET_ALL)
