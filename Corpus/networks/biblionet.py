@@ -2,21 +2,21 @@
 """
 author: poppy riddle
 date: April 2025
-version:1.2
+version:1.3
 developed from Phil Mongeon's R code here:
 Purpose:
     to take two input files that come from 'file_to_works.py' and 'citations.py'
-    there are two files that should be in a data subfolder:
+    there are two files that should be in a 'data' subfolder:
         citations.csv
         works.csv
-    The methods allow for the creation of network files that can be used for network analysis..
+    The methods allow for the creation of network files that can be used for network analysis.
 
 Args:
     citations.csv
     works.csv
 
 Returns:
-    network files that can be used for network analysis such as:
+    network files located in a 'networks' subfolder that can be used for network analysis such as:
         edge list as net_(type).csv
         node list as nodes_(type).csv
     Example:
@@ -27,8 +27,14 @@ Usage:
     analysis = BiblioNet(works_file,citations_file)
     analysis.load_data()
     analysis.clean_data()
+    #basic networks
     analysis.net_bc()
     analysis.net_dc()
+    analysis.net_cc()
+    #hybrid versions
+    analysis.net_bc_cc_dc()
+    analysis.net_bc_dc()
+    analysis.net_cc_dc()
     analysis.nodes_export()
 """
 import argparse
@@ -54,8 +60,27 @@ class BiblioNet:
 
     def load_data(self)->None:
         #loads files into dataframes
-        self.works = pd.read_csv(self.works_file)
-        self.citations = pd.read_csv(self.citations_file)
+        try:
+            self.works = pd.read_csv(self.works_file)
+        except FileNotFoundError:
+            print(Fore.LIGHTRED_EX + f"File {self.works_file} not found" + Style.RESET_ALL)
+        except pd.errors.EmptyDataError:
+            print(Fore.LIGHTRED_EX + f"File {self.works_file} is empty" + Style.RESET_ALL)
+        except pd.errors.ParserError:
+            print(Fore.LIGHTRED_EX + f"Parse error in {self.works_file}" + Style.RESET_ALL)
+        except Exception as e:
+            print(Fore.LIGHTRED_EX + "Attempt to open {self.works_file} resulted in exception: {e}" + Style.RESET_ALL)
+
+        try:
+            self.citations = pd.read_csv(self.citations_file)
+        except FileNotFoundError:
+            print(Fore.LIGHTRED_EX + f"File {self.citations_file} not found" + Style.RESET_ALL)
+        except pd.errors.EmptyDataError:
+            print(Fore.LIGHTRED_EX + f"File {self.citations_file} is empty" + Style.RESET_ALL)
+        except pd.errors.ParserError:
+            print(Fore.LIGHTRED_EX + f"Parse error in {self.citations_file}" + Style.RESET_ALL)
+        except Exception as e:
+            print(Fore.LIGHTRED_EX + f"Attempt to open {self.citations_file} resulted in exception: {e}" + Style.RESET_ALL)
 
 
     def clean_data(self):
@@ -190,7 +215,14 @@ class BiblioNet:
         #net_cc_dc <- bind_rows(net_cc, net_dc) %>%
         # group_by(source, target) %>%
         # summarize(weight = sum(weight))
-        net_cc = self._
+        net_cc = self._net_cc
+        net_dc = self._net_dc
+        #concat together net_cc and net_dc
+        net_cc_dc = pd.concat([net_cc, net_dc])
+        #groupby source, target and then sum the weights, then reset index
+        net_cc_dc = net_cc_dc.groupby(['source','target']).agg({'weight':'sum'}).reset_index()
+        #export to csv
+        self.export_edges(net_cc_dc, "net_cc_dc.csv")
 
 
     def export_edges(self, df, file_name):
@@ -289,6 +321,8 @@ def main(works_file, citations_file):
     analysis.net_bc_cc()
     print(".........calculating bc_dc edges...")
     analysis.net_bc_dc()
+    print("..........calculating cc_dc edges...")
+    analysis.net_cc_dc()
     print(Fore.LIGHTMAGENTA_EX + ".....calculating nodes..this can take a while..."+ Style.RESET_ALL)
     analysis.nodes_export()
     print(Fore.LIGHTBLUE_EX + "All complete! Thank you for shopping at S-Mart!" + Style.RESET_ALL)
