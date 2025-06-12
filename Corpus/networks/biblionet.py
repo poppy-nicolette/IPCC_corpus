@@ -47,6 +47,10 @@ class BiblioNet:
         self.citations_file = citations_file
         self.works = None
         self.citations = None
+        #internal instance variables
+        self._net_bc = None
+        self._net_dc = None
+        self._net_cc = None
 
     def load_data(self)->None:
         #loads files into dataframes
@@ -63,99 +67,131 @@ class BiblioNet:
     def net_bc(self):
         #creates the bibliographic coupling edges
         #merges work id and citations on citing id
-        net_bc = self.works[['id']].merge(self.citations, left_on='id', right_on='citing_id', how='inner')
-        #only keeps those that match
-        net_bc = net_bc[net_bc['citing_id'].isin(self.works['id'])]
-        #renames columns
-        net_bc = net_bc[['id', 'cited_id']].rename(columns={'id': 'source', 'cited_id': 'target'})
-        #add weight
-        net_bc['weight'] = 1
-        # undirected at this point
-        net_bc['type'] = 'undirected' #note undirected
-        #makes both int just to be sure.
-        net_bc['source'] = net_bc['source'].astype(int)
-        net_bc['target'] = net_bc['target'].astype(int)
+        if self._net_bc is None:
+            net_bc = self.works[['id']].merge(self.citations, left_on='id', right_on='citing_id', how='inner')
+            #only keeps those that match
+            net_bc = net_bc[net_bc['citing_id'].isin(self.works['id'])]
+            #renames columns
+            net_bc = net_bc[['id', 'cited_id']].rename(columns={'id': 'source', 'cited_id': 'target'})
+            #add weight
+            net_bc['weight'] = 1
+            # undirected at this point
+            net_bc['type'] = 'undirected' #note undirected
+            #makes both int just to be sure.
+            net_bc['source'] = net_bc['source'].astype(int)
+            net_bc['target'] = net_bc['target'].astype(int)
 
-        self.export_edges(net_bc, "net_bc.csv")
+            self.export_edges(net_bc, "net_bc.csv")
+            #save as an instance variable for use later
+            self.net_bc = net_bc
+        return self._net_bc
 
     def net_dc(self):
         #creates direct citation edges, using a mask, probably don't need this step
         # but it might be necessary for certain citations files that extend beyond core works
-        net_dc = self.citations[
-            self.citations['citing_id'].isin(self.works['id']) &
-            self.citations['cited_id'].isin(self.works['id'])
-        ]
-        #rename cols
-        net_dc = net_dc.rename(columns={'citing_id':'source', 'cited_id':'target'})
-        #add weight and type cols
-        net_dc = net_dc.assign(weight=1, type='directed')
-        #remove dupes
-        net_dc = net_dc.drop_duplicates() # should this add instead of drop?
-        #make sure they're both int
-        net_dc['source'] = net_dc['source'].astype(int)
-        net_dc['target'] = net_dc['target'].astype(int)
+        if self._net_dc is None:
+            net_dc = self.citations[
+                self.citations['citing_id'].isin(self.works['id']) &
+                self.citations['cited_id'].isin(self.works['id'])
+            ]
+            #rename cols
+            net_dc = net_dc.rename(columns={'citing_id':'source', 'cited_id':'target'})
+            #add weight and type cols
+            net_dc = net_dc.assign(weight=1, type='directed')
+            #remove dupes
+            net_dc = net_dc.drop_duplicates() # should this add instead of drop?
+            #make sure they're both int
+            net_dc['source'] = net_dc['source'].astype(int)
+            net_dc['target'] = net_dc['target'].astype(int)
 
-        self.export_edges(net_dc, "net_dc.csv")
+            self.export_edges(net_dc, "net_dc.csv")
+            #assign to instance variable
+            self._net_dc = net_dc
+        return self._net_dc
 
     def net_cc(self):
         #creates co-citation edges
         # just get one column
-        works_id = self.works['id']
-        #first inner join on 'id' and 'cited_id'
-        joined_citations = pd.merge(works_id, self.citations, left_on='id', right_on= 'cited_id', how='inner')
-        #second inner join on 'citing_id'
-        joined_citations = pd.merge(joined_citations, self.citations, on='citing_id', how='inner')
-        #print(f"after second join: \n{joined_citations.head(2)}")
-        #filter - could have done this first?
-        filtered_citations = joined_citations[joined_citations['cited_id_y'].isin(joined_citations['id'])]
-        #rename cols
-        filtered_citations = filtered_citations.rename(columns={'cited_id_x':'source', 'cited_id_y':'target'})
-        #print(f"after rename cols: \n{filtered_citations.head(2)}")
-        #filter where source is less than target r:  filter(source < target)
-        # i don't totally understand this, becuase these are ids?
-        filtered_citations = filtered_citations[filtered_citations['source']<filtered_citations['target']]
-        # groupby 'source' and 'target' in that order, and use size() as equivalent for summarize
-        net_cc = filtered_citations.groupby(['source','target']).size().reset_index(name='weight')
-        #print(f"after groupby:\n{net_cc.head(2)}")
-        #add type col with value 'undirected'
-        net_cc['type'] = 'undirected'
-        #print(f"added undirected in type: \n{net_cc.head(2)}")
-        #convert to ints
-        net_cc['source'] = net_cc['source'].astype(int)
-        net_cc['target'] = net_cc['target'].astype(int)
+        if self._net_cc is None:
+            works_id = self.works['id']
+            #first inner join on 'id' and 'cited_id'
+            joined_citations = pd.merge(works_id, self.citations, left_on='id', right_on= 'cited_id', how='inner')
+            #second inner join on 'citing_id'
+            joined_citations = pd.merge(joined_citations, self.citations, on='citing_id', how='inner')
+            #print(f"after second join: \n{joined_citations.head(2)}")
+            #filter - could have done this first?
+            filtered_citations = joined_citations[joined_citations['cited_id_y'].isin(joined_citations['id'])]
+            #rename cols
+            filtered_citations = filtered_citations.rename(columns={'cited_id_x':'source', 'cited_id_y':'target'})
+            #print(f"after rename cols: \n{filtered_citations.head(2)}")
+            #filter where source is less than target r:  filter(source < target)
+            # i don't totally understand this, becuase these are ids?
+            filtered_citations = filtered_citations[filtered_citations['source']<filtered_citations['target']]
+            # groupby 'source' and 'target' in that order, and use size() as equivalent for summarize
+            net_cc = filtered_citations.groupby(['source','target']).size().reset_index(name='weight')
+            #print(f"after groupby:\n{net_cc.head(2)}")
+            #add type col with value 'undirected'
+            net_cc['type'] = 'undirected'
+            #print(f"added undirected in type: \n{net_cc.head(2)}")
+            #convert to ints
+            net_cc['source'] = net_cc['source'].astype(int)
+            net_cc['target'] = net_cc['target'].astype(int)
 
-        self.export_edges(net_cc, "net_cc.csv")
+            self.export_edges(net_cc, "net_cc.csv")
+            #assign to instance variable
+            self._net_cc = net_cc
+        return self._net_cc
+
 
     def net_bc_cc_dc(self):
         #creates hybrid BC-CC-DC edges
-        ...
-        #return net_bc_cc_dc
+        net_bc = self._net_bc
+        net_dc = self._net_dc
+        net_cc = self._net_cc
+
+        #concat together all three
+        net_bc_cc_dc = pd.concat([net_bc, net_dc, net_cc])
+        #groupby and then create new column weight with agg which sums weight for each group
+        net_bc_cc_dc = net_bc_cc_dc.groupby(['source','target']).agg({'weight':'sum'}).reset_index()
+        #export
+        self.export_edges(net_bc_cc_dc, "net_bc_cc_dc.csv")
 
     def net_bc_cc(self):
         #creates hybrid BC-CC edges
-        ...
-        #return net_bc_cc
+        # net_bc_cc <- bind_rows(net_cc, net_bc) %>%
+        # group_by(source, target) %>%
+        # summarize(weight = sum(weight))
+        net_bc = self._net_bc
+        net_cc = self._net_cc
+        # contact both together
+        net_bc_cc = pd.concat([net_bc, net_cc])
+        #same as above for group and sum weight
+        net_bc_cc = net_bc_cc.groupby(['source','target']).agg({'weight':'sum'}).reset_index()
+        #export
+        self.export_edges(net_bc_cc, "net_bc_cc.csv")
 
     def net_bc_dc(self):
         #creates hybrid BC-DC edges
-        ...
-        #return net_bc_dc
+        # net_bc_dc <- bind_rows(net_bc, net_dc) %>%
+        # group_by(source, target) %>%
+        # summarize(weight = sum(weight))
+        net_bc = self._net_bc
+        net_dc = self._net_dc
+        #concat both together
+        net_bc_dc = pd.concat([net_bc, net_dc])
+        # same as above for group and sum weight
+        net_bc_dc = net_bc_dc.groupby(['source','target']).agg({'weight':'sum'}).reset_index()
+        #export
+        self.export_edges(net_bc_dc, "net_bc_dc.csv")
+
 
     def net_cc_dc(self):
         #creates hybrid CC-DC edges
-        ...
-        #return net_cc_dc
+        #net_cc_dc <- bind_rows(net_cc, net_dc) %>%
+        # group_by(source, target) %>%
+        # summarize(weight = sum(weight))
+        net_cc = self._
 
-    def edges_net_bc(self,net_bc):
-        #exports to csv
-        directory = "networks"
-        file_path = os.path.join(directory,"net_bc.csv")
-        #check if dir exists
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-        #write file
-        net_bc.to_csv(file_path,encoding="utf-8",index=False)
-        print(Fore.LIGHTCYAN_EX + f"✅ Exported file as {file_path}" + Style.RESET_ALL)
 
     def export_edges(self, df, file_name):
         #exports to csv
@@ -247,6 +283,12 @@ def main(works_file, citations_file):
     analysis.net_dc()
     print(".......calculating cc edges...")
     analysis.net_cc()
+    print(".......calculating bc_dc_cc edges....")
+    analysis.net_bc_cc_dc()
+    print("........calculating bc_cc edges...")
+    analysis.net_bc_cc()
+    print(".........calculating bc_dc edges...")
+    analysis.net_bc_dc()
     print(Fore.LIGHTMAGENTA_EX + ".....calculating nodes..this can take a while..."+ Style.RESET_ALL)
     analysis.nodes_export()
     print(Fore.LIGHTBLUE_EX + "All complete! Thank you for shopping at S-Mart!" + Style.RESET_ALL)
