@@ -1,0 +1,9 @@
+# Local dataset files, not for the code repo
+citations_full.csv
+works_full.csv
+OneDrive_1_*.zip
+.DS_Store
+
+# Python bytecode
+__pycache__/
+*.pyc

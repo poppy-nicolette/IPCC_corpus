@@ -42,9 +42,8 @@ import glob
 import pandas as pd
 from colorama import Fore,Style
 import os
-import networkx as nx
-from networkx.algorithms.community import louvain_communities, greedy_modularity_communities
-from networkx.algorithms.centrality import closeness_centrality, eigenvector_centrality
+import igraph as ig
+import leidenalg as la
 
 
 class BiblioNet:
@@ -70,6 +69,16 @@ class BiblioNet:
             print(Fore.LIGHTRED_EX + f"Parse error in {self.works_file}" + Style.RESET_ALL)
         except Exception as e:
             print(Fore.LIGHTRED_EX + "Attempt to open {self.works_file} resulted in exception: {e}" + Style.RESET_ALL)
+
+        #Normalize the OpenAlex id column name. The sample works.csv calls it
+        #'openalex_id'; the full works_full.csv calls it 'openalex_work_id'. The rest
+        #of the code (nodes_export merge, Label rename) expects 'openalex_id', so we
+        #standardize to that here rather than editing the CSVs. Accept either spelling.
+        if self.works is not None and 'openalex_id' not in self.works.columns:
+            for alt in ('openalex_work_id', 'openalex_work', 'openalex'):
+                if alt in self.works.columns:
+                    self.works = self.works.rename(columns={alt: 'openalex_id'})
+                    break
 
         try:
             self.citations = pd.read_csv(self.citations_file)
@@ -101,7 +110,11 @@ class BiblioNet:
             net_bc = net_bc[net_bc['citing_id'].isin(self.works['id'])]
             #renames columns
             net_bc = net_bc[['id', 'citing_id']].rename(columns={'id': 'source', 'citing_id': 'target'})
-            #filter for source < target
+            #cast ids to int BEFORE the source<target dedup so ordering is numeric,
+            #not lexicographic ("100" < "99" as strings flips the edge orientation).
+            net_bc['source'] = net_bc['source'].astype(int)
+            net_bc['target'] = net_bc['target'].astype(int)
+            #filter for source < target (numeric)
             net_bc = net_bc[net_bc['source']<net_bc['target']]
             #add weight
             net_bc['weight'] = 1
@@ -109,13 +122,10 @@ class BiblioNet:
             net_bc = net_bc.groupby(['source','target']).agg({'weight':'sum'}).reset_index()
             # undirected at this point
             net_bc['type'] = 'undirected' #note undirected
-            #makes both int just to be sure.
-            net_bc['source'] = net_bc['source'].astype(int)
-            net_bc['target'] = net_bc['target'].astype(int)
             #export to csv
             self.export_edges(net_bc, "net_bc.csv")
             #save as an instance variable for use later
-            self.net_bc = net_bc
+            self._net_bc = net_bc
         return self._net_bc
 
     def net_dc(self):
@@ -156,8 +166,11 @@ class BiblioNet:
             #rename cols
             filtered_citations = filtered_citations.rename(columns={'cited_id_x':'source', 'cited_id_y':'target'})
             #print(f"after rename cols: \n{filtered_citations.head(2)}")
-            #filter where source is less than target r:  filter(source < target)
-            # i don't totally understand this, becuase these are ids?
+            #cast ids to int BEFORE the source<target dedup so ordering is numeric,
+            #not lexicographic ("100" < "99" as strings flips the edge orientation).
+            filtered_citations['source'] = filtered_citations['source'].astype(int)
+            filtered_citations['target'] = filtered_citations['target'].astype(int)
+            #filter where source is less than target (numeric): r: filter(source < target)
             filtered_citations = filtered_citations[filtered_citations['source']<filtered_citations['target']]
             # groupby 'source' and 'target' in that order, and use size() as equivalent for summarize
             net_cc = filtered_citations.groupby(['source','target']).size().reset_index(name='weight')
@@ -165,9 +178,6 @@ class BiblioNet:
             #add type col with value 'undirected'
             net_cc['type'] = 'undirected'
             #print(f"added undirected in type: \n{net_cc.head(2)}")
-            #convert to ints
-            net_cc['source'] = net_cc['source'].astype(int)
-            net_cc['target'] = net_cc['target'].astype(int)
 
             self.export_edges(net_cc, "net_cc.csv")
             #assign to instance variable
@@ -175,60 +185,48 @@ class BiblioNet:
         return self._net_cc
 
 
-    def net_bc_cc_dc(self):
-        #creates hybrid BC-CC-DC edges
-        net_bc = self._net_bc
-        net_dc = self._net_dc
-        net_cc = self._net_cc
+    @staticmethod
+    def _hybrid_undirected(parts):
+        #combine one or more edge frames into a single UNDIRECTED weighted edge list.
+        #
+        #Every edge is canonicalized to (source = min id, target = max id) BEFORE the
+        #weight sum. This does two things:
+        #  1. A directed DC edge a->b and its reciprocal b->a collapse onto the same
+        #     {a,b} pair, so their weights add (reciprocal citations -> weight 2).
+        #  2. DC aligns with the already-undirected BC/CC edges on the same node pair,
+        #     so the hybrid carries one weighted edge per pair, not one per orientation.
+        #BC and CC are already min<max oriented, so this is a no-op for them.
+        combined = pd.concat(parts)[['source', 'target', 'weight']].copy()
+        lo = combined[['source', 'target']].min(axis=1)
+        hi = combined[['source', 'target']].max(axis=1)
+        combined['source'] = lo
+        combined['target'] = hi
+        return combined.groupby(['source', 'target']).agg({'weight': 'sum'}).reset_index()
 
-        #concat together all three
-        net_bc_cc_dc = pd.concat([net_bc, net_dc, net_cc])
-        #groupby and then create new column weight with agg which sums weight for each group
-        net_bc_cc_dc = net_bc_cc_dc.groupby(['source','target']).agg({'weight':'sum'}).reset_index()
-        #export
+    def net_bc_cc_dc(self):
+        #creates hybrid BC-CC-DC edges (undirected, weights summed across types)
+        net_bc_cc_dc = self._hybrid_undirected([self._net_bc, self._net_dc, self._net_cc])
         self.export_edges(net_bc_cc_dc, "net_bc_cc_dc.csv")
 
     def net_bc_cc(self):
-        #creates hybrid BC-CC edges
+        #creates hybrid BC-CC edges (undirected, weights summed across types)
         # net_bc_cc <- bind_rows(net_cc, net_bc) %>%
-        # group_by(source, target) %>%
-        # summarize(weight = sum(weight))
-        net_bc = self._net_bc
-        net_cc = self._net_cc
-        # contact both together
-        net_bc_cc = pd.concat([net_bc, net_cc])
-        #same as above for group and sum weight
-        net_bc_cc = net_bc_cc.groupby(['source','target']).agg({'weight':'sum'}).reset_index()
-        #export
+        # group_by(source, target) %>% summarize(weight = sum(weight))
+        net_bc_cc = self._hybrid_undirected([self._net_bc, self._net_cc])
         self.export_edges(net_bc_cc, "net_bc_cc.csv")
 
     def net_bc_dc(self):
-        #creates hybrid BC-DC edges
+        #creates hybrid BC-DC edges (undirected, weights summed across types)
         # net_bc_dc <- bind_rows(net_bc, net_dc) %>%
-        # group_by(source, target) %>%
-        # summarize(weight = sum(weight))
-        net_bc = self._net_bc
-        net_dc = self._net_dc
-        #concat both together
-        net_bc_dc = pd.concat([net_bc, net_dc])
-        # same as above for group and sum weight
-        net_bc_dc = net_bc_dc.groupby(['source','target']).agg({'weight':'sum'}).reset_index()
-        #export
+        # group_by(source, target) %>% summarize(weight = sum(weight))
+        net_bc_dc = self._hybrid_undirected([self._net_bc, self._net_dc])
         self.export_edges(net_bc_dc, "net_bc_dc.csv")
 
-
     def net_cc_dc(self):
-        #creates hybrid CC-DC edges
+        #creates hybrid CC-DC edges (undirected, weights summed across types)
         #net_cc_dc <- bind_rows(net_cc, net_dc) %>%
-        # group_by(source, target) %>%
-        # summarize(weight = sum(weight))
-        net_cc = self._net_cc
-        net_dc = self._net_dc
-        #concat together net_cc and net_dc
-        net_cc_dc = pd.concat([net_cc, net_dc])
-        #groupby source, target and then sum the weights, then reset index
-        net_cc_dc = net_cc_dc.groupby(['source','target']).agg({'weight':'sum'}).reset_index()
-        #export to csv
+        # group_by(source, target) %>% summarize(weight = sum(weight))
+        net_cc_dc = self._hybrid_undirected([self._net_cc, self._net_dc])
         self.export_edges(net_cc_dc, "net_cc_dc.csv")
 
 
@@ -244,55 +242,75 @@ class BiblioNet:
         df.to_csv(file_path,encoding="utf-8",index=False)
         print(Fore.LIGHTCYAN_EX + f"✅ Exported {file_name} file as {file_path}" + Style.RESET_ALL)
 
-    def nodes_export(self):
-        #creates the bibliographic coupling nodes
+    def nodes_export(self, closeness_max_nodes=50000, seed=42):
+        #computes node-level attributes (components, clusters, centralities) per network.
+        #
+        #Moved off networkx to igraph/leidenalg for the full-scale (666K-node DC) graph:
+        #  - networkx louvain_communities / greedy_modularity_communities do not scale;
+        #    igraph's multilevel (Louvain) and leidenalg (Leiden) are C-backed and fast.
+        #  - closeness_centrality is O(V*E) and will not finish on DC; it is skipped above
+        #    closeness_max_nodes (set to None to force it everywhere).
+        #  - eigenvector uses igraph's ARPACK solver, which does not suffer the
+        #    non-convergence of networkx's power-iteration eigenvector_centrality.
+        #
         # List files in the directory and filter those that start with "net_"
         net_files = [f for f in os.listdir("networks/") if f.startswith("net_")]
+
+        #make igraph's RNG reproducible so Louvain/Leiden labels are stable across runs
+        try:
+            ig.set_random_number_generator(__import__('random'))
+            __import__('random').seed(seed)
+        except Exception:
+            pass  # older igraph without a settable RNG; clustering still works
 
         for file in net_files:
             # Read the CSV file into a DataFrame
             df = pd.read_csv(os.path.join("networks", file))
             print(f".....calculating nodes for {file}...")
 
-            #create a graph from the DataFrame, uses column names for attributes
-            network = nx.from_pandas_edgelist(df, source='source', target='target', edge_attr='weight')
+            #build an undirected igraph from the edge list; vertex names are the work ids.
+            #use_vids=False -> the source/target *values* become vertex 'name' attributes,
+            #and the extra columns (weight, type) ride along as edge attributes.
+            g = ig.Graph.DataFrame(df[['source', 'target', 'weight']],
+                                   directed=False, use_vids=False)
+            names = g.vs['name']
+            n = g.vcount()
 
-            #components - see documentation in NetworkX for the enumeration comprehension
-            #copied and pasted from documentation
-            components = list(nx.connected_components(network))
-            component_map = {node: idx for idx, component in enumerate(components) for node in component}
-            nx.set_node_attributes(network, component_map, 'comp')
+            #components: membership is a per-vertex list, index-aligned to g.vs
+            comp = g.connected_components().membership
 
-            #louvain clusters, note last line in nx.set_node_attributes
-            louvain_clusters = list(louvain_communities(network, weight='weight'))
-            cluster_map = {node: idx for idx, cluster in enumerate(louvain_clusters) for node in cluster}
-            nx.set_node_attributes(network, cluster_map, 'cluster_louvain')
+            #Louvain (weighted) — igraph multilevel, the scalable replacement
+            louvain = g.community_multilevel(weights='weight').membership
 
-            #Phil's code uses leiden clusters (using greedy modularity as a proxy)
-            #update this to use leidenalg in the future
-            leiden_clusters = list(greedy_modularity_communities(network, weight='weight'))
-            cluster_map = {node: idx for idx, cluster in enumerate(leiden_clusters) for node in cluster}
-            nx.set_node_attributes(network, cluster_map, 'cluster_leiden')
+            #Leiden (weighted), modularity objective — real Leiden now, via leidenalg.
+            #The old code's 'cluster_leiden' column was greedy_modularity as a proxy;
+            #this column is now genuinely Leiden, so the data dictionary can say so.
+            leiden = la.find_partition(g, la.ModularityVertexPartition,
+                                       weights='weight', seed=seed).membership
 
-            # degree, closeness, and eigen centrality
-            degree_dict = dict(network.degree())
-            closeness_dict = closeness_centrality(network)
-            eigen_dict = eigenvector_centrality(network)
+            #degree (unweighted node degree), matching the original
+            degree = g.degree()
 
-            #from NetworkX tutorial
-            nx.set_node_attributes(network, degree_dict, 'degree')
-            nx.set_node_attributes(network, closeness_dict, 'closeness')
-            nx.set_node_attributes(network, eigen_dict, 'eigen_centrality')
+            #closeness and eigenvector are computed UNWEIGHTED to match the original
+            #networkx calls (which passed no weight); note igraph would otherwise treat
+            #'weight' as a distance, which is wrong for similarity edges.
+            if closeness_max_nodes is not None and n > closeness_max_nodes:
+                print(f"      (skipping closeness: {n} nodes > {closeness_max_nodes})")
+                closeness = [float('nan')] * n
+            else:
+                closeness = g.closeness()  # unweighted, hop-based
 
-            #create final nodes_df with node attributes
+            eigen = g.eigenvector_centrality(weights=None)  # ARPACK, unweighted
+
+            #assemble nodes_df; all lists are index-aligned to the igraph vertex order
             nodes_df = pd.DataFrame({
-                "id": list(network.nodes()),
-                "component": [network.nodes[node]['comp'] for node in network.nodes()],
-                "cluster_louvain": [network.nodes[node]['cluster_louvain'] for node in network.nodes()],
-                "cluster_leiden": [network.nodes[node]['cluster_leiden'] for node in network.nodes()],
-                "degree": [network.nodes[node]['degree'] for node in network.nodes()],
-                "closeness": [network.nodes[node]['closeness'] for node in network.nodes()],
-                "eigen_centrality": [network.nodes[node]['eigen_centrality'] for node in network.nodes()]
+                "id": names,
+                "component": comp,
+                "cluster_louvain": louvain,
+                "cluster_leiden": leiden,
+                "degree": degree,
+                "closeness": closeness,
+                "eigen_centrality": eigen,
             })
 
             #add an openalex id to the nodes for identification later in the visualization
